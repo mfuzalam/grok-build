@@ -185,6 +185,15 @@ pub struct FuzzyFileMatcher {
     dirs: bool,
 }
 
+/// Minimum raw nucleo score for a query of `query_chars` characters.
+///
+/// Helix compares `(7 + len * 14) / 3` against scores it has already divided
+/// by 3 (`Completion::score` in helix-term `completion.rs` at d79cce4e4bfc).
+/// This matcher reads raw nucleo scores, so the cutoff is that numerator.
+fn min_nucleo_score(query_chars: u32) -> u32 {
+    7 + query_chars * 14
+}
+
 impl FuzzyFileMatcher {
     /// Create a matcher with default config focused on matching paths.
     /// If the thread pool cannot spawn (cgroup pids / `RLIMIT_NPROC`), degrade to browse-only: keyed queries return no matches.
@@ -476,9 +485,10 @@ impl FuzzyFileMatcher {
         }
 
         // https://github.com/helix-editor/helix/blob/d79cce4e4bfc24dd204f1b294c899ed73f7e9453/helix-term/src/ui/completion.rs#L369
-        // suggested min score = 7 * len + 14
+        // Helix stores scores divided by 3 and cuts at `(7 + len * 14) / 3`.
+        // Raw scores use the same numerator. Not `7 * len + 14`.
         let len = self.query.chars().count() as u32;
-        let min_score = 7 + len * 14;
+        let min_score = min_nucleo_score(len);
 
         let Some(nucleo) = self.nucleo.as_ref() else {
             return Vec::new();
@@ -750,6 +760,16 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    #[test]
+    fn min_nucleo_score_matches_helix_numerator() {
+        // Helix: `(7 + len * 14) / 3` on scores already divided by 3.
+        for len in [0, 1, 2, 5, 10] {
+            assert_eq!(min_nucleo_score(len), 7 + len * 14);
+        }
+        // Identical to the swapped form `7 * len + 14` only at len == 1.
+        assert_ne!(min_nucleo_score(5), 7 * 5 + 14);
     }
 
     #[test]
